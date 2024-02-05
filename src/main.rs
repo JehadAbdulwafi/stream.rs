@@ -1,8 +1,15 @@
-use anyhow::{Ok, Result};
-use axum::{routing::get, Router};
-use tower_http::trace::TraceLayer;
-use tracing::info;
+use anyhow::Result;
+use dotenv::dotenv;
+use sqlx::postgres::PgPoolOptions;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+mod error; 
+mod http;
+mod utils;
+
+#[derive(Clone)]
+pub struct State {
+    pub pool: sqlx::PgPool,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -10,20 +17,15 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let app = Router::new()
-        .route("/", get(root))
-        .layer(TraceLayer::new_for_http());
+    dotenv().ok();
 
-    print!("hello world!");
+    let pool = PgPoolOptions::new()
+        .connect(std::env::var("DATABASE_URL").unwrap().as_str())
+        .await?;
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8000").await?;
-    info!("listening on: http://localhost:8000");
+    let app_state = State { pool: pool.clone() };
 
-    axum::serve(listener, app).await?;
+    sqlx::migrate!().run(&pool).await?;
 
-    Ok(())
-}
-
-async fn root() -> &'static str {
-    "hello world!"
+    http::serve(app_state).await
 }

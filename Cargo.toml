@@ -18,4 +18,6 @@ jsonwebtoken = "8.0"
 once_cell = "1.8"
 anyhow = "1.0.79"
 dotenv = "0.15.0"
-sqlx = { version = "0.6.1", features = ["runtime-tokio-rustls", "postgres", "macros"] }
+sqlx = { version = "0.6.1", features = ["runtime-tokio-rustls", "postgres", "macros", "uuid"] }
+uuid = "1.7.0"
+rand = "0.8.5"
