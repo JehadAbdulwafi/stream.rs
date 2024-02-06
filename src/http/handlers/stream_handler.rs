@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use axum::{
     extract::Json,
-    extract::{Query, Request},
+    extract::Request,
     http::StatusCode,
     response::IntoResponse,
     Extension,

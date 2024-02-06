@@ -1,4 +1,8 @@
-ALTER  TABLE streams
-RENAME COLUMN isLive TO is_alive,
-ADD COLUMN viewers INTEGER DEFAULT 0,
-ADD COLUMN totle_viewers INTEGER DEFAULT 0;
+ALTER TABLE streams
+  RENAME COLUMN isLive TO is_alive;
+
+ALTER TABLE streams
+  ADD COLUMN viewers INTEGER DEFAULT 0;
+
+ALTER TABLE streams
+  ADD COLUMN total_viewers INTEGER DEFAULT 0;
