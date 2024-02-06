@@ -1,11 +1,5 @@
 use anyhow::anyhow;
-use axum::{
-    extract::Json,
-    extract::Request,
-    http::StatusCode,
-    response::IntoResponse,
-    Extension,
-};
+use axum::{extract::Json, http::StatusCode, response::IntoResponse, Extension};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use uuid::Uuid;
@@ -28,9 +22,8 @@ pub struct PublishEvent {
 
 struct Stream {
     id: Uuid,
-    islive: Option<bool>,
+    is_alive: Option<bool>,
 }
-
 
 pub async fn on_publish(
     app_state: Extension<State>,
@@ -52,25 +45,28 @@ pub async fn on_publish(
 
     let stream: Stream = sqlx::query_as!(
         Stream,
-        "SELECT id, isLive FROM streams WHERE app = $1 AND stream_name = $2",
+        "SELECT id, is_alive FROM streams WHERE app = $1 AND stream_name = $2",
         payload.app,
         payload.stream,
     )
     .fetch_one(&app_state.pool)
     .await
-    .map_err(|err| anyhow!("Failed to fetch user: {}", err))?;
+    .map_err(|err| anyhow!("Failed to find stream: {}", err))?;
 
     info!("on_publish => Received request: {:?} \n", payload);
 
-    match stream.islive {
+    match stream.is_alive {
         Some(value) => {
             if value == true {
                 return Ok((StatusCode::CONFLICT, "Stream already published").into_response());
             } else {
-                let _ = sqlx::query!("UPDATE streams SET isLive = true WHERE id = $1", stream.id)
-                    .execute(&app_state.pool)
-                    .await
-                    .map_err(|err| anyhow!("Failed to update stream status: {}", err))?;
+                let _ = sqlx::query!(
+                    "UPDATE streams SET is_alive = true WHERE id = $1",
+                    stream.id
+                )
+                .execute(&app_state.pool)
+                .await
+                .map_err(|err| anyhow!("Failed to update stream status: {}", err))?;
                 return Ok((StatusCode::OK, response.to_string()).into_response());
             }
         }
@@ -98,25 +94,28 @@ pub async fn on_unpublish(
 
     let stream: Stream = sqlx::query_as!(
         Stream,
-        "SELECT id, isLive FROM streams WHERE app = $1 AND stream_name = $2",
+        "SELECT id, is_alive FROM streams WHERE app = $1 AND stream_name = $2",
         payload.app,
         payload.stream,
     )
     .fetch_one(&app_state.pool)
     .await
-    .map_err(|err| anyhow!("Failed to fetch user: {}", err))?;
+    .map_err(|err| anyhow!("Failed to find stream: {}", err))?;
 
-    info!("on_publish => Received request: {:?} \n", payload);
+    info!("on_unpublish => Received request: {:?} \n", payload);
 
-    match stream.islive {
+    match stream.is_alive {
         Some(value) => {
             if value == false {
                 return Ok((StatusCode::CONFLICT, "Stream already unpublished").into_response());
             } else {
-                let _ = sqlx::query!("UPDATE streams SET isLive = false WHERE id = $1", stream.id)
-                    .execute(&app_state.pool)
-                    .await
-                    .map_err(|err| anyhow!("Failed to update stream status: {}", err))?;
+                let _ = sqlx::query!(
+                    "UPDATE streams SET is_alive = true, viewers = 0 WHERE id = $1",
+                    stream.id
+                )
+                .execute(&app_state.pool)
+                .await
+                .map_err(|err| anyhow!("Failed to update stream status: {}", err))?;
                 return Ok((StatusCode::OK, response.to_string()).into_response());
             }
         }
@@ -124,24 +123,63 @@ pub async fn on_unpublish(
     }
 }
 
-pub async fn on_play(request: Request) -> String {
-    // TODO: increse number of viewers
+pub async fn on_play(
+    app_state: Extension<State>,
+    Json(payload): Json<PublishEvent>,
+) -> Result<impl IntoResponse, AppError> {
+    info!("on_play => Received request: {:?} \n", payload);
     let response = serde_json::json!({
         "code": 0
     });
 
-    info!("on_play => Received request: {:?} \n", request);
+    let stream: Stream = sqlx::query_as!(
+        Stream,
+        "SELECT id, is_alive FROM streams WHERE app = $1 AND stream_name = $2",
+        payload.app,
+        payload.stream,
+    )
+    .fetch_one(&app_state.pool)
+    .await
+    .map_err(|err| anyhow!("Failed to find stream: {}", err))?;
 
-    response.to_string()
+    let _ = sqlx::query!(
+        "UPDATE streams SET viewers = viewers + 1, total_viewers = total_viewers + 1 WHERE id = $1",
+        stream.id
+    )
+    .execute(&app_state.pool)
+    .await
+    .map_err(|err| anyhow!("Failed to update stream status: {}", err))?;
+
+
+    Ok((StatusCode::OK, response.to_string()).into_response())
 }
-pub async fn on_stop(request: Request) -> String {
-    // TODO: decrese number of viewers
+pub async fn on_stop(
+    app_state: Extension<State>,
+    Json(payload): Json<PublishEvent>,
+) -> Result<impl IntoResponse, AppError> {
     let response = serde_json::json!({
         "code": 0
     });
 
-    info!("on_stop => Received body: {:?} \n", request.body());
+    let stream: Stream = sqlx::query_as!(
+        Stream,
+        "SELECT id, is_alive FROM streams WHERE app = $1 AND stream_name = $2",
+        payload.app,
+        payload.stream,
+    )
+    .fetch_one(&app_state.pool)
+    .await
+    .map_err(|err| anyhow!("Failed to find stream: {}", err))?;
 
-    response.to_string()
+    let _ = sqlx::query!(
+        "UPDATE streams SET viewers = viewers - 1 WHERE id = $1",
+        stream.id
+    )
+    .execute(&app_state.pool)
+    .await
+    .map_err(|err| anyhow!("Failed to update stream status: {}", err))?;
+
+    info!("on_stop => Received request: {:?} \n", payload);
+
+    Ok((StatusCode::OK, response.to_string()).into_response())
 }
-
