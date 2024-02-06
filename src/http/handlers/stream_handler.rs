@@ -1,6 +1,16 @@
-use axum::{extract::Request, extract::Json};
+use anyhow::anyhow;
+use axum::{
+    extract::Json,
+    extract::{Query, Request},
+    http::StatusCode,
+    response::IntoResponse,
+    Extension,
+};
 use serde::{Deserialize, Serialize};
 use tracing::info;
+use uuid::Uuid;
+
+use crate::{error::AppError, State};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PublishEvent {
@@ -16,37 +26,109 @@ pub struct PublishEvent {
     stream_id: String,
 }
 
-pub async fn on_publish(Json(request): Json<PublishEvent>) -> String {
+struct Stream {
+    id: Uuid,
+    islive: Option<bool>,
+}
+
+
+pub async fn on_publish(
+    app_state: Extension<State>,
+    Json(payload): Json<PublishEvent>,
+) -> Result<impl IntoResponse, AppError> {
     let response = serde_json::json!({
         "code": 0
     });
 
+    let token = payload
+        .param
+        .splitn(2, '&')
+        .next()
+        .map(|s| s.trim_start_matches("?token="))
+        .unwrap_or_default()
+        .to_string();
 
-    info!("on_publish => Received request: {:?} \n", request);
+    info!("token: {}", token);
 
-    response.to_string()
+    let stream: Stream = sqlx::query_as!(
+        Stream,
+        "SELECT id, isLive FROM streams WHERE app = $1 AND stream_name = $2",
+        payload.app,
+        payload.stream,
+    )
+    .fetch_one(&app_state.pool)
+    .await
+    .map_err(|err| anyhow!("Failed to fetch user: {}", err))?;
+
+    info!("on_publish => Received request: {:?} \n", payload);
+
+    match stream.islive {
+        Some(value) => {
+            if value == true {
+                return Ok((StatusCode::CONFLICT, "Stream already published").into_response());
+            } else {
+                let _ = sqlx::query!("UPDATE streams SET isLive = true WHERE id = $1", stream.id)
+                    .execute(&app_state.pool)
+                    .await
+                    .map_err(|err| anyhow!("Failed to update stream status: {}", err))?;
+                return Ok((StatusCode::OK, response.to_string()).into_response());
+            }
+        }
+        None => return Ok((StatusCode::CONFLICT, "Stream already published").into_response()),
+    }
 }
 
-pub async fn on_unpublish(Json(request): Json<PublishEvent>) -> String {
+pub async fn on_unpublish(
+    app_state: Extension<State>,
+    Json(payload): Json<PublishEvent>,
+) -> Result<impl IntoResponse, AppError> {
     let response = serde_json::json!({
         "code": 0
     });
 
-    // TODO: turn off stream
+    let token = payload
+        .param
+        .splitn(2, '&')
+        .next()
+        .map(|s| s.trim_start_matches("token="))
+        .unwrap_or_default()
+        .to_string();
 
-    info!("on_unpublish => Received request: {:?} \n", request);
+    info!("token: {}", token);
 
-    response.to_string()
+    let stream: Stream = sqlx::query_as!(
+        Stream,
+        "SELECT id, isLive FROM streams WHERE app = $1 AND stream_name = $2",
+        payload.app,
+        payload.stream,
+    )
+    .fetch_one(&app_state.pool)
+    .await
+    .map_err(|err| anyhow!("Failed to fetch user: {}", err))?;
+
+    info!("on_publish => Received request: {:?} \n", payload);
+
+    match stream.islive {
+        Some(value) => {
+            if value == false {
+                return Ok((StatusCode::CONFLICT, "Stream already unpublished").into_response());
+            } else {
+                let _ = sqlx::query!("UPDATE streams SET isLive = false WHERE id = $1", stream.id)
+                    .execute(&app_state.pool)
+                    .await
+                    .map_err(|err| anyhow!("Failed to update stream status: {}", err))?;
+                return Ok((StatusCode::OK, response.to_string()).into_response());
+            }
+        }
+        None => return Ok((StatusCode::CONFLICT, "Stream already published").into_response()),
+    }
 }
-
 
 pub async fn on_play(request: Request) -> String {
-
     // TODO: increse number of viewers
     let response = serde_json::json!({
         "code": 0
     });
-
 
     info!("on_play => Received request: {:?} \n", request);
 
@@ -58,8 +140,8 @@ pub async fn on_stop(request: Request) -> String {
         "code": 0
     });
 
-
     info!("on_stop => Received body: {:?} \n", request.body());
 
     response.to_string()
 }
+
